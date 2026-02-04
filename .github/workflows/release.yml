@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -37,7 +37,7 @@ jobs:
           echo "✅ Version extracted from version.json: ${VERSION}"
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -62,12 +62,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -90,7 +90,7 @@ jobs:
           echo "✓ Package created: $PACKAGE_FILE"
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: nuget-package
           path: ${{ steps.package.outputs.path }}
@@ -107,12 +107,12 @@ jobs:
 
     steps:
       - name: Download package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: nuget-package
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -138,16 +138,16 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: nuget-package
           path: ./release-assets
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.validate-build.outputs.version }}
           name: Release ${{ needs.validate-build.outputs.version }}
