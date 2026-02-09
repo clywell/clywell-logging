@@ -40,19 +40,22 @@ using Clywell.Core.Logging.Extensions;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add Clywell logging with defaults
-builder.AddClywellLogging();
+// Note: This configures Serilog and sets Log.Logger
+builder.AddLogging();
 
 var app = builder.Build();
 
 // Add correlation ID and request ID tracking
-app.UseClywellRequestTracking();
+// Must be called before RequestLogging
+app.UseRequestTracking();
 
 // Add Serilog request logging
-app.UseClywellRequestLogging();
+app.UseRequestLogging();
 
 app.MapGet("/", (ILogger<Program> logger) =>
 {
-    logger.LogInformation("Hello from Clywell logging!");
+    // Use Clywell extension for IsEnabled check
+    logger.Info("Hello from Clywell logging!");
     return "Hello World!";
 });
 
@@ -62,7 +65,7 @@ app.Run();
 ### 2. Custom Configuration
 
 ```csharp
-builder.AddClywellLogging(config =>
+builder.AddLogging(config =>
 {
     config
         .WithMinimumLevel(LogEventLevel.Debug)
@@ -111,7 +114,7 @@ CorrelationIdEnricher.CurrentCorrelationId = "custom-correlation-id";
 logger.LogInformation("This log will have the correlation ID");
 
 // Or use middleware (automatic)
-app.UseClywellRequestTracking();
+app.UseRequestTracking();
 ```
 
 #### Request ID Enricher
@@ -156,11 +159,11 @@ logger.LogInformation("Card: {CardNumber}", "4532-1234-5678-9010");
 ```csharp
 using Clywell.Core.Logging.Extensions;
 
-// Only creates the string if Debug is enabled
-logger.LogDebugIfEnabled(() => $"Expensive operation: {GetExpensiveData()}");
+// Only logs if Debug is enabled (internal check)
+logger.Debug("Expensive operation: {Data}", expensiveData);
 
-// Only creates the string if Trace is enabled
-logger.LogTraceIfEnabled(() => $"Very detailed trace: {GetTraceData()}");
+// Only logs if Trace is enabled (internal check)
+logger.Trace("Very detailed trace: {Data}", traceData);
 ```
 
 #### Execution Time Logging
@@ -237,7 +240,7 @@ app.UseClywellRequestTracking();
 ### Development Environment
 
 ```csharp
-builder.AddClywellLogging(config =>
+builder.AddLogging(config =>
 {
     config
         .WithMinimumLevel(LogEventLevel.Debug)
@@ -250,7 +253,7 @@ builder.AddClywellLogging(config =>
 ### Production Environment
 
 ```csharp
-builder.AddClywellLogging(config =>
+builder.AddLogging(config =>
 {
     config
         .WithMinimumLevel(LogEventLevel.Information)
@@ -332,7 +335,7 @@ Log.Logger = logger;
 Then read from configuration:
 
 ```csharp
-builder.AddClywellLogging(config =>
+builder.AddLogging(config =>
 {
     config.ReadFromConfiguration()
           .WithClywellDefaults();
@@ -377,8 +380,8 @@ logger.LogInformation("User {UserId} logged in", userId);
 // ❌ BAD: Always creates the string
 logger.LogDebug($"Query result: {JsonSerializer.Serialize(largeObject)}");
 
-// ✅ GOOD: Only creates string if Debug is enabled
-logger.LogDebugIfEnabled(() => $"Query result: {JsonSerializer.Serialize(largeObject)}");
+// ✅ GOOD: Only creates string if Debug is enabled (internal check)
+logger.Debug("Query result: {Result}", JsonSerializer.Serialize(largeObject));
 ```
 
 ### 3. Use Execution Time Logging
@@ -399,8 +402,8 @@ var result = await logger.LogExecutionTimeAsync("DatabaseQuery",
 
 ```csharp
 // Required for correlation/request IDs
-app.UseClywellRequestTracking();
-app.UseClywellRequestLogging();
+app.UseRequestTracking();
+app.UseRequestLogging();
 ```
 
 ---

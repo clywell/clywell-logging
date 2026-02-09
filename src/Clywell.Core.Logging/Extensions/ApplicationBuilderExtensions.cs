@@ -36,7 +36,7 @@ public static class ApplicationBuilderExtensions
 
         // Configure Serilog as the logging provider
         builder.Logging.ClearProviders();
-        builder.Logging.AddSerilog(dispose: true);
+        builder.Host.UseSerilog();
 
         return builder;
     }
