@@ -114,80 +114,6 @@ jobs:
         continue-on-error: true
 
   # ============================================================
-  # Benchmark Results
-  # ============================================================
-  benchmarks:
-    runs-on: ubuntu-latest
-    name: Performance Benchmarks
-    # Skip benchmarks for Dependabot PRs and only run on main branch pushes from real commits
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'dependabot[bot]'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore dependencies
-        run: dotnet restore
-
-      - name: Build benchmark runner
-        run: dotnet build --configuration Release tests/Clywell.Core.Logging.BenchmarkRunner/Clywell.Core.Logging.BenchmarkRunner.csproj --no-restore
-
-      - name: Run benchmarks (LoggerScopes)
-        run: dotnet run -c Release -- --filter "*LoggerScopeExtensionsBenchmarks*" --exporters json
-        working-directory: tests/Clywell.Core.Logging.BenchmarkRunner
-        timeout-minutes: 30
-        continue-on-error: true
-
-      - name: Run benchmarks (SensitiveDataRedaction)
-        run: dotnet run -c Release -- --filter "*SensitiveDataRedactionBenchmarks*" --exporters json
-        working-directory: tests/Clywell.Core.Logging.BenchmarkRunner
-        timeout-minutes: 30
-        continue-on-error: true
-
-      - name: Upload benchmark results
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: benchmark-results
-          path: '**/BenchmarkDotNet.Artifacts/'
-
-      - name: Comment benchmark results on PR
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            
-            // Find benchmark results
-            const resultsDir = './tests/Clywell.Core.Logging.BenchmarkRunner/BenchmarkDotNet.Artifacts/results';
-            if (fs.existsSync(resultsDir)) {
-              const files = fs.readdirSync(resultsDir);
-              const jsonFile = files.find(f => f.endsWith('.json'));
-              
-              if (jsonFile) {
-                const results = JSON.parse(fs.readFileSync(path.join(resultsDir, jsonFile), 'utf8'));
-                
-                let comment = '## 📊 Benchmark Results\n\n';
-                comment += '**Summary:**\n';
-                comment += `- Total benchmarks: ${results.length}\n`;
-                
-                github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: comment
-                });
-              }
-            }
-        continue-on-error: true
-
-  # ============================================================
   # Build Documentation
   # ============================================================
   documentation:
@@ -204,8 +130,6 @@ jobs:
         run: |
           echo "Checking documentation files..."
           test -f README.md && echo "✓ Main README found" || echo "✗ Main README missing"
-          test -f docs/INDEX.md && echo "✓ Documentation index found" || echo "✗ Documentation index missing"
-          test -f tests/Clywell.Core.Logging.Tests/Benchmarks/README.md && echo "✓ Benchmark README found" || echo "✗ Benchmark README missing"
           test -f tests/Clywell.Core.Logging.BenchmarkRunner/README.md && echo "✓ Benchmark runner README found" || echo "✗ Benchmark runner README missing"
 
   # ============================================================
