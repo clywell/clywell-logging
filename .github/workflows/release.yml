@@ -85,8 +85,8 @@ jobs:
             -o ./artifacts \
             src/Clywell.Core.Logging/Clywell.Core.Logging.csproj
           
-          PACKAGE_FILE=$(find ./artifacts -name "*.nupkg" | head -1)
-          echo "path=$(pwd)/$PACKAGE_FILE" >> $GITHUB_OUTPUT
+          PACKAGE_FILE=$(find artifacts -name "*.nupkg" | head -1)
+          echo "path=$PACKAGE_FILE" >> $GITHUB_OUTPUT
           echo "✓ Package created: $PACKAGE_FILE"
 
       - name: Upload package artifact
