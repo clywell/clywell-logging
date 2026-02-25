@@ -1,3 +1,4 @@
+Note: The tool simplified the command to ` cat > /Users/sodiqyekeen/Documents/dev/clywell-core/clywell-logging/README.md << 'ENDOFFILE'
 # Clywell.Core.Logging
 
 [![NuGet](https://img.shields.io/nuget/v/Clywell.Core.Logging.svg)](https://www.nuget.org/packages/Clywell.Core.Logging/)
@@ -11,12 +12,14 @@ Structured logging infrastructure with Serilog for the Clywell platform. Provide
 
 ✅ **Serilog Integration** - Fluent configuration for Serilog with best practices  
 ✅ **Correlation & Request Tracking** - Automatic correlation IDs and request IDs for distributed tracing  
-✅ **Performance Optimized** - `IsEnabled()` checks prevent unnecessary string allocations  
+✅ **Performance Optimized** - `IsEnabled()` checks built into shorthand extension methods  
 ✅ **Sensitive Data Redaction** - Automatic redaction of passwords, credit cards, API keys  
 ✅ **Multiple Sinks** - Console, File, Seq, Application Insights  
-✅ **Environment Enrichers** - Machine name, thread info, custom properties  
+✅ **Environment Enrichers** - Machine name and log context enrichment  
 ✅ **Execution Time Logging** - Built-in helpers for measuring operation duration  
+✅ **Logging Scopes** - Strongly-typed property scopes for tenant, user, and operation context  
 ✅ **ASP.NET Core Middleware** - Track correlation IDs and request IDs across HTTP requests  
+✅ **Testing Utilities** - In-memory sink and assertion helpers for unit tests  
 ✅ **.NET 10.0+** - Modern C# features and latest language version  
 ✅ **80%+ Test Coverage** - Comprehensive unit tests with FluentAssertions
 
@@ -39,16 +42,12 @@ using Clywell.Core.Logging.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add Clywell logging with defaults
-builder.AddClywellLogging();
+builder.AddLogging();
 
 var app = builder.Build();
 
-// Add correlation ID and request ID tracking
-app.UseClywellRequestTracking();
-
-// Add Serilog request logging
-app.UseClywellRequestLogging();
+app.UseRequestTracking(); // adds CorrelationId + RequestId middleware
+app.UseRequestLogging();  // adds Serilog HTTP request logging
 
 app.MapGet("/", (ILogger<Program> logger) =>
 {
@@ -59,18 +58,24 @@ app.MapGet("/", (ILogger<Program> logger) =>
 app.Run();
 ```
 
+`AddLogging()` with no arguments applies:
+- `WithClywellDefaults()` — correlation ID, request ID, environment enrichers, sensitive data redaction
+- `WithConsoleSink()` — human-readable console output
+- `ReadFromConfiguration()` — merges `appsettings.json` Serilog section if present
+
 ### 2. Custom Configuration
 
 ```csharp
-builder.AddClywellLogging(config =>
+using Serilog.Events;
+
+builder.AddLogging(config =>
 {
     config
         .WithMinimumLevel(LogEventLevel.Debug)
         .WithConsoleSink(useJson: true)
         .WithFileSink("logs/app-.txt")
         .WithSeqSink("http://localhost:5341")
-        .WithApplicationInsightsSink()
-        .WithClywellDefaults(); // Adds all enrichers
+        .WithApplicationInsightsSink();
 });
 ```
 
@@ -78,16 +83,14 @@ builder.AddClywellLogging(config =>
 
 ```csharp
 using Clywell.Core.Logging.Configuration;
-using Serilog;
+using Serilog.Events;
 
-var logger = ClywellLoggerConfiguration.Create()
+ClywellLoggerConfiguration.Create()
     .WithMinimumLevel(LogEventLevel.Information)
     .WithConsoleSink()
     .WithCorrelationId()
     .WithSensitiveDataRedaction()
-    .Build();
-
-Log.Logger = logger;
+    .BuildAndSetGlobalLogger();
 
 Log.Information("Application started");
 ```
@@ -96,89 +99,101 @@ Log.Information("Application started");
 
 ## Core Components
 
-### 1. Enrichers
+### 1. ApplicationBuilderExtensions
 
-#### Correlation ID Enricher
-
-Adds a correlation ID to every log entry for distributed tracing:
+#### `AddLogging` — registers Serilog as the logging provider
 
 ```csharp
-using Clywell.Core.Logging.Enrichers;
+// Default setup
+builder.AddLogging();
 
-// Set correlation ID manually
-CorrelationIdEnricher.CurrentCorrelationId = "custom-correlation-id";
-
-logger.LogInformation("This log will have the correlation ID");
-
-// Or use middleware (automatic)
-app.UseClywellRequestTracking();
+// With custom configuration
+builder.AddLogging(config =>
+{
+    config
+        .WithMinimumLevel(LogEventLevel.Debug)
+        .WithConsoleSink()
+        .WithClywellDefaults();
+});
 ```
 
-#### Request ID Enricher
-
-Adds a unique request ID to every log entry:
+#### `UseRequestTracking` — adds correlation ID and request ID middleware
 
 ```csharp
-using Clywell.Core.Logging.Enrichers;
-
-// Set request ID manually
-RequestIdEnricher.CurrentRequestId = "custom-request-id";
-
-logger.LogInformation("This log will have the request ID");
-
-// Or use middleware (automatic)
-app.UseClywellRequestTracking();
+app.UseRequestTracking();
 ```
 
-### 2. Sensitive Data Redaction
+Call this **early in the pipeline** so IDs are available for all logs in subsequent middleware.
 
-Automatically redacts sensitive data from logs:
+#### `UseRequestLogging` — adds Serilog HTTP request logging
 
 ```csharp
-logger.LogInformation("User password: {Password}", "mySecret123");
-// Output: User password: ***REDACTED***
-
-logger.LogInformation("Card: {CardNumber}", "4532-1234-5678-9010");
-// Output: Card: ***REDACTED***
+app.UseRequestLogging();
 ```
 
-**Supported patterns:**
-- Credit cards (4532-1234-5678-9010)
-- Social Security Numbers (123-45-6789)
-- Passwords (password: secret)
-- API Keys (api_key: abc123)
-- Email/password combos
+Logs every HTTP request with method, path, status code, elapsed time, host, scheme, remote IP, user agent, correlation ID, and request ID.
 
-### 3. Performance Logging Extensions
+---
 
-#### Debug/Trace with IsEnabled Check
+### 2. ClywellLoggerConfiguration
+
+Fluent builder for Serilog, used inside `AddLogging()` or standalone for console apps.
+
+```csharp
+ClywellLoggerConfiguration.Create()              // static factory; accepts optional IConfiguration
+    .WithMinimumLevel(LogEventLevel.Information)
+    .WithConsoleSink(useJson: false)             // false = human-readable, true = JSON
+    .WithFileSink("logs/app-.txt", RollingInterval.Day)
+    .WithSeqSink("http://localhost:5341")
+    .WithApplicationInsightsSink(connectionString)
+    .WithCorrelationId()                         // add CorrelationIdEnricher
+    .WithRequestId()                             // add RequestIdEnricher
+    .WithEnvironmentEnrichers()                  // MachineName + FromLogContext
+    .WithSensitiveDataRedaction()                // SensitiveDataRedactionPolicy
+    .WithClywellDefaults()                       // all 4 enrichers/policies in one call
+    .OverrideMinimumLevel("Microsoft", LogEventLevel.Warning)
+    .ReadFromConfiguration()                     // merge appsettings.json Serilog section
+    .Build();                                    // returns Serilog ILogger
+
+// Or set the global Serilog logger directly:
+config.BuildAndSetGlobalLogger();
+```
+
+`WithClywellDefaults()` is shorthand for:
+`WithCorrelationId()` + `WithRequestId()` + `WithEnvironmentEnrichers()` + `WithSensitiveDataRedaction()`
+
+---
+
+### 3. LoggerExtensions
+
+Performance-optimized shorthand methods on `ILogger`. Every method includes a built-in `IsEnabled()` guard to prevent unnecessary string allocations.
 
 ```csharp
 using Clywell.Core.Logging.Extensions;
 
-// Only creates the string if Debug is enabled
-logger.LogDebugIfEnabled(() => $"Expensive operation: {GetExpensiveData()}");
-
-// Only creates the string if Trace is enabled
-logger.LogTraceIfEnabled(() => $"Very detailed trace: {GetTraceData()}");
+logger.Trace("Entering {Method}", nameof(MyMethod));
+logger.Debug("Processing item {ItemId}", itemId);
+logger.Info("User {UserId} logged in", userId);
+logger.Warning("Retry attempt {Attempt} for {Operation}", attempt, operation);
+logger.Error("Failed to save order {OrderId}", orderId);
+logger.Error(exception, "Unhandled error processing {OrderId}", orderId);
+logger.Critical("Database unreachable");
+logger.Critical(exception, "Fatal startup error");
 ```
+
+These are drop-in replacements for the standard `LogTrace`, `LogDebug`, `LogInformation`, etc. with the automatic `IsEnabled` check built in.
 
 #### Execution Time Logging
 
 ```csharp
-// Sync operation
-var result = logger.LogExecutionTime("DatabaseQuery", () =>
-{
-    return database.QueryData();
-});
-// Output: DatabaseQuery completed in 45ms
+// Synchronous
+var result = logger.LogExecutionTime("DatabaseQuery", () => db.QueryData());
+// Logs: DatabaseQuery completed in 45ms
 
-// Async operation
-var result = await logger.LogExecutionTimeAsync("ApiCall", async () =>
-{
-    return await httpClient.GetAsync("https://api.example.com");
-});
-// Output: ApiCall completed in 230ms
+// Asynchronous
+var data = await logger.LogExecutionTimeAsync("ApiCall",
+    async () => await httpClient.GetAsync("https://api.example.com"));
+// Logs: ApiCall completed in 230ms
 ```
 
 #### Timed Scopes
@@ -190,95 +205,234 @@ using (logger.BeginTimedScope("ProcessOrder", new Dictionary<string, object>
     ["CustomerId"] = customerId
 }))
 {
-    // Process order
+    // all logs here include the scope properties
 }
-// Output: Starting ProcessOrder with properties { OrderId: 123, CustomerId: 456 }
-// Output: Completed ProcessOrder in 1234ms
+// Logs: Starting ProcessOrder with properties { OrderId: 123, CustomerId: 456 }
+// Logs: Completed ProcessOrder in 1234ms
 ```
-
-### 4. Middleware
-
-#### Correlation ID Middleware
-
-```csharp
-app.UseMiddleware<CorrelationIdMiddleware>();
-
-// Or use the extension
-app.UseClywellRequestTracking();
-```
-
-**Features:**
-- Reads `X-Correlation-ID` header from request
-- Generates new GUID if not provided
-- Adds `X-Correlation-ID` to response headers
-- Stores in `HttpContext.Items["CorrelationId"]`
-- Automatically enriches all logs
-
-#### Request ID Middleware
-
-```csharp
-app.UseMiddleware<RequestIdMiddleware>();
-
-// Or use the extension
-app.UseClywellRequestTracking();
-```
-
-**Features:**
-- Reads `X-Request-ID` header from request
-- Generates new GUID if not provided
-- Adds `X-Request-ID` to response headers
-- Stores in `HttpContext.Items["RequestId"]`
-- Automatically enriches all logs
 
 ---
 
-## Configuration Examples
+### 4. LoggerScopeExtensions
 
-### Development Environment
+Creates structured logging scopes. All log messages within a scope automatically carry its properties.
 
 ```csharp
-builder.AddClywellLogging(config =>
+using Clywell.Core.Logging.Extensions;
+
+// Single property
+using (logger.BeginPropertyScope("OrderId", orderId))
+    logger.Info("Order processing started");
+
+// Two or three properties (tuples)
+using (logger.BeginPropertyScope(("TenantId", tenantId), ("UserId", userId)))
+    logger.Info("User action performed");
+
+// Dictionary of properties
+using (logger.BeginPropertyScope(new Dictionary<string, object?>
 {
-    config
-        .WithMinimumLevel(LogEventLevel.Debug)
-        .WithConsoleSink() // Human-readable
-        .WithFileSink("logs/dev-.txt")
-        .WithClywellDefaults();
+    ["Environment"] = env,
+    ["Version"] = version
+}))
+    logger.Info("Deployment started");
+
+// Params tuples (any number)
+using (logger.BeginPropertyScope(
+    ("Region", region),
+    ("Service", service),
+    ("InstanceId", instanceId)))
+    logger.Info("Service registered");
+```
+
+#### Convenience Scopes
+
+```csharp
+// Adds "TenantId" property
+using (logger.BeginTenantScope(tenantId)) { ... }
+
+// Adds "UserId" property
+using (logger.BeginUserScope(userId)) { ... }
+
+// Adds "TenantId" and "UserId" properties
+using (logger.BeginTenantUserScope(tenantId, userId)) { ... }
+
+// Adds "OperationName" (and optionally "OperationId") properties
+using (logger.BeginOperationScope("PlaceOrder", operationId)) { ... }
+```
+
+---
+
+### 5. Enrichers
+
+#### CorrelationIdEnricher
+
+Adds a `CorrelationId` property to every log entry.
+
+- Uses `AsyncLocal<string?>` — scoped to the current async execution context
+- If no value is set, a new GUID is generated automatically per log event
+- The `CorrelationIdMiddleware` reads `X-Correlation-ID` from the request header (or generates a GUID), stores it on the enricher, writes it to the response header, and stores it in `HttpContext.Items["CorrelationId"]`
+
+```csharp
+using Clywell.Core.Logging.Enrichers;
+
+// Set manually (e.g., in a background job or test)
+CorrelationIdEnricher.CurrentCorrelationId = "my-correlation-id";
+```
+
+#### RequestIdEnricher
+
+Adds a `RequestId` property to log entries when a value is set.
+
+- Uses `AsyncLocal<string?>` — only enriches when a value is present (no fallback GUID)
+- The `RequestIdMiddleware` reads `X-Request-ID` from the request header (or generates a GUID), stores it on the enricher, writes it to the response header, and stores it in `HttpContext.Items["RequestId"]`
+
+```csharp
+using Clywell.Core.Logging.Enrichers;
+
+RequestIdEnricher.CurrentRequestId = "my-request-id";
+```
+
+---
+
+### 6. Middleware
+
+Both middleware components are registered together via `app.UseRequestTracking()`, or individually:
+
+```csharp
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<RequestIdMiddleware>();
+```
+
+| Middleware | Header read | Header written | `HttpContext.Items` key |
+|---|---|---|---|
+| `CorrelationIdMiddleware` | `X-Correlation-ID` | `X-Correlation-ID` | `"CorrelationId"` |
+| `RequestIdMiddleware` | `X-Request-ID` | `X-Request-ID` | `"RequestId"` |
+
+---
+
+### 7. Sensitive Data Redaction
+
+`SensitiveDataRedactionPolicy` is a Serilog `IDestructuringPolicy` that scans string log values and replaces matched patterns with `***REDACTED***`.
+
+**Default patterns:**
+
+| Pattern | Example input | Result |
+|---|---|---|
+| Credit card | `4532-1234-5678-9010` | `***REDACTED***` |
+| SSN | `123-45-6789` | `***REDACTED***` |
+| Password field | `password: secret` | `***REDACTED***` |
+| API key field | `api_key: abc123` | `***REDACTED***` |
+| Email + password combo | `user@example.com: secret` | `***REDACTED***` |
+
+#### Enable via `ClywellLoggerConfiguration`
+
+```csharp
+config.WithSensitiveDataRedaction(); // included automatically in WithClywellDefaults()
+```
+
+#### Enable via dependency injection
+
+```csharp
+// Default — all built-in patterns
+builder.Services.AddSensitiveDataRedaction();
+
+// Custom configuration
+builder.Services.AddSensitiveDataRedaction(options =>
+{
+    options
+        .DisableCreditCardRedaction()
+        .AddCustomPattern(@"\bINTERNAL_TOKEN\b");
 });
 ```
 
-### Production Environment
+#### `SensitiveDataRedactionPolicyOptions`
 
 ```csharp
-builder.AddClywellLogging(config =>
-{
-    config
-        .WithMinimumLevel(LogEventLevel.Information)
-        .WithConsoleSink(useJson: true) // JSON for container logs
-        .WithApplicationInsightsSink() // Azure monitoring
-        .WithClywellDefaults()
-        .OverrideMinimumLevel("Microsoft", LogEventLevel.Warning) // Reduce noise
-        .OverrideMinimumLevel("System", LogEventLevel.Warning);
-});
+SensitiveDataRedactionPolicyOptions.Create()
+    .AddCustomPattern(@"\bDATABASE_URL\b")
+    .AddCustomPattern(@"\bAPI_TOKEN\b", RegexOptions.None)
+    .DisableCreditCardRedaction()
+    .DisableSocialSecurityRedaction()
+    .DisablePasswordRedaction()
+    .DisableApiKeyRedaction()
+    .DisableEmailPasswordRedaction()
+    .DisableAllDefaults()
+    .Build(); // returns SensitiveDataRedactionPolicy
 ```
 
-### Full Configuration
+#### Static utility
 
 ```csharp
-var logger = ClywellLoggerConfiguration.Create(configuration)
-    .WithMinimumLevel(LogEventLevel.Debug)
-    .WithConsoleSink(useJson: false)
-    .WithFileSink("logs/app-.txt", RollingInterval.Day)
-    .WithSeqSink("http://localhost:5341")
-    .WithApplicationInsightsSink(connectionString)
-    .WithCorrelationId()
-    .WithRequestId()
-    .WithEnvironmentEnrichers()
-    .WithSensitiveDataRedaction()
-    .OverrideMinimumLevel("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
-    .Build();
+var redacted = SensitiveDataRedactionPolicy.RedactSensitiveData("password: secret123");
+// Returns: ***REDACTED***
+```
 
-Log.Logger = logger;
+---
+
+### 8. Testing Utilities
+
+The `Clywell.Core.Logging.Testing` namespace provides helpers for unit testing logging behaviour.
+
+#### `InMemoryLogSink`
+
+Captures Serilog log events during a test.
+
+```csharp
+var sink = new InMemoryLogSink();
+
+sink.LoggedEvents                               // all captured events
+sink.GetEvents(LogEventLevel.Warning)           // at or above a level
+sink.GetEventsForLevel(LogEventLevel.Error)     // at exactly a level
+sink.GetEventsContaining("OrderId")             // by message template text
+sink.GetEventsWithProperty("TenantId")          // by property name
+sink.Clear()                                    // reset between tests
+```
+
+#### `TestLoggerFactory`
+
+Creates `Microsoft.Extensions.Logging.ILogger` instances backed by an `InMemoryLogSink`.
+
+```csharp
+// Logger + sink together (most common)
+var (logger, sink) = TestLoggerFactory.CreateTestLoggerWithSink();
+
+// Typed logger
+var (logger, sink) = TestLoggerFactory.CreateTestLoggerWithSink<MyService>();
+
+// Provide your own sink
+var sink = new InMemoryLogSink();
+var logger = TestLoggerFactory.CreateTestLogger(sink, LogEventLevel.Debug);
+```
+
+#### `LogAssertions`
+
+Extension methods on `InMemoryLogSink` for test assertions.
+
+```csharp
+sink.ShouldHaveLogged(LogEventLevel.Information);
+sink.ShouldHaveLogged(LogEventLevel.Error, "OrderId");
+sink.ShouldNotHaveLogged(LogEventLevel.Warning);
+sink.ShouldHaveProperty("CorrelationId");
+sink.ShouldHavePropertyValue("TenantId", "acme");
+sink.ShouldHaveException<InvalidOperationException>();
+```
+
+**Example test:**
+
+```csharp
+[Fact]
+public void LogsUserIdInScope()
+{
+    var (logger, sink) = TestLoggerFactory.CreateTestLoggerWithSink<UserService>();
+
+    using (logger.BeginUserScope("user-123"))
+    {
+        logger.Info("Action performed");
+    }
+
+    sink.ShouldHaveLogged(LogEventLevel.Information, "Action performed");
+    sink.ShouldHavePropertyValue("UserId", "user-123");
+}
 ```
 
 ---
@@ -287,16 +441,6 @@ Log.Logger = logger;
 
 ```json
 {
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft": "Warning",
-      "Microsoft.Hosting.Lifetime": "Information"
-    },
-    "Seq": {
-      "ServerUrl": "http://localhost:5341"
-    }
-  },
   "Serilog": {
     "MinimumLevel": {
       "Default": "Information",
@@ -323,84 +467,168 @@ Log.Logger = logger;
     ],
     "Enrich": ["FromLogContext", "WithMachineName"]
   },
+  "Logging": {
+    "Seq": {
+      "ServerUrl": "http://localhost:5341"
+    }
+  },
   "ApplicationInsights": {
     "ConnectionString": "InstrumentationKey=..."
   }
 }
 ```
 
-Then read from configuration:
+`ReadFromConfiguration()` is called automatically by `AddLogging()`, or explicitly:
 
 ```csharp
-builder.AddClywellLogging(config =>
+builder.AddLogging(config => config.ReadFromConfiguration().WithClywellDefaults());
+```
+
+---
+
+## Environment-Specific Examples
+
+### Development
+
+```csharp
+builder.AddLogging(config =>
 {
-    config.ReadFromConfiguration()
-          .WithClywellDefaults();
+    config
+        .WithMinimumLevel(LogEventLevel.Debug)
+        .WithConsoleSink()
+        .WithFileSink("logs/dev-.txt")
+        .WithClywellDefaults();
+});
+```
+
+### Production
+
+```csharp
+builder.AddLogging(config =>
+{
+    config
+        .WithMinimumLevel(LogEventLevel.Information)
+        .WithConsoleSink(useJson: true)
+        .WithApplicationInsightsSink()
+        .WithClywellDefaults()
+        .OverrideMinimumLevel("Microsoft", LogEventLevel.Warning)
+        .OverrideMinimumLevel("System", LogEventLevel.Warning);
 });
 ```
 
 ---
 
-## Testing
+## Middleware Pipeline Order
 
-The package includes comprehensive unit tests with 80%+ code coverage:
+```csharp
+var app = builder.Build();
 
-```bash
-dotnet test
+app.UseRequestTracking(); // FIRST — sets CorrelationId and RequestId for all logs below
+app.UseRequestLogging();  // SECOND — logs each request with enriched properties
+
+app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
 ```
-
-**Test coverage:**
-- ✅ Correlation ID enricher
-- ✅ Request ID enricher
-- ✅ Sensitive data redaction
-- ✅ Configuration builder
-- ✅ Performance logging extensions
-- ✅ Middleware (correlation & request IDs)
 
 ---
 
 ## Best Practices
 
-### 1. Use Structured Logging
+### Use structured logging
 
 ```csharp
-// ❌ BAD: String interpolation
+// ❌ BAD: string interpolation loses structure
 logger.LogInformation($"User {userId} logged in");
 
-// ✅ GOOD: Structured logging
+// ✅ GOOD: named placeholder preserves structure
 logger.LogInformation("User {UserId} logged in", userId);
 ```
 
-### 2. Use Performance Extensions for Expensive Logs
+### Use shorthand extensions for expensive log values
 
 ```csharp
-// ❌ BAD: Always creates the string
+// ❌ BAD: serialization always runs even if Debug is disabled
 logger.LogDebug($"Query result: {JsonSerializer.Serialize(largeObject)}");
 
-// ✅ GOOD: Only creates string if Debug is enabled
-logger.LogDebugIfEnabled(() => $"Query result: {JsonSerializer.Serialize(largeObject)}");
+// ✅ GOOD: Debug() checks IsEnabled first; serialization only runs when needed
+logger.Debug("Query result: {Result}", JsonSerializer.Serialize(largeObject));
 ```
 
-### 3. Use Execution Time Logging
+### Use execution time helpers instead of manual stopwatches
 
 ```csharp
-// ❌ BAD: Manual timing
-var stopwatch = Stopwatch.StartNew();
+// ❌ BAD: boilerplate
+var sw = Stopwatch.StartNew();
 var result = await database.QueryAsync();
-stopwatch.Stop();
-logger.LogInformation("Query took {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
+sw.Stop();
+logger.LogInformation("Query took {ElapsedMs}ms", sw.ElapsedMilliseconds);
 
-// ✅ GOOD: Built-in timing
-var result = await logger.LogExecutionTimeAsync("DatabaseQuery", 
-    () => database.QueryAsync());
+// ✅ GOOD
+var result = await logger.LogExecutionTimeAsync("DatabaseQuery", () => database.QueryAsync());
 ```
 
-### 4. Always Use Middleware
+### Use scopes to correlate log groups
 
 ```csharp
-// Required for correlation/request IDs
-app.UseClywellRequestTracking();
-app.UseClywellRequestLogging();
+// All logs inside this scope automatically include TenantId and UserId
+using (logger.BeginTenantUserScope(tenantId, userId))
+{
+    logger.Info("Processing request");
+    await ProcessAsync();
+    logger.Info("Request complete");
+}
+```
+
+---
+
+## Troubleshooting
+
+### Logs Not Appearing
+
+1. Check log level configuration
+2. Ensure middleware is added to the pipeline
+3. Verify sinks are configured correctly
+
+```csharp
+// Debug: Enable verbose logging temporarily
+config.WithMinimumLevel(LogEventLevel.Verbose);
+```
+
+### Correlation IDs Not Working
+
+Ensure middleware is added **early** in the pipeline:
+
+```csharp
+app.UseRequestTracking(); // Must be early
+app.UseRouting();
+app.UseAuthorization();
+app.MapControllers();
+```
+
+And confirm the enricher is registered:
+
+```csharp
+config.WithCorrelationId();
+// Or use defaults:
+config.WithClywellDefaults();
+```
+
+### High Memory Usage
+
+Reduce log verbosity in production and rely on the built-in `IsEnabled` guards:
+
+```csharp
+config
+    .WithMinimumLevel(LogEventLevel.Information)
+    .OverrideMinimumLevel("Microsoft", LogEventLevel.Warning)
+    .OverrideMinimumLevel("System", LogEventLevel.Warning);
+
+// Shorthand extensions check IsEnabled — no allocation when level is disabled
+logger.Debug("Result: {Data}", GetExpensiveData());
 ```
 
 ---
@@ -409,19 +637,21 @@ app.UseClywellRequestLogging();
 
 - **.NET 10.0+**
 - **Serilog 4.0+**
-- **ASP.NET Core 10.0+** (for middleware)
+- **ASP.NET Core 10.0+** (for `AddLogging`, `UseRequestTracking`, `UseRequestLogging`)
 
 ---
 
 ## Dependencies
 
-- Serilog
-- Serilog.AspNetCore
-- Serilog.Sinks.Console
-- Serilog.Sinks.File
-- Serilog.Sinks.Seq
-- Serilog.Sinks.ApplicationInsights
-- Microsoft.Extensions.Logging.Abstractions
+- `Serilog`
+- `Serilog.AspNetCore`
+- `Serilog.Sinks.Console`
+- `Serilog.Sinks.File`
+- `Serilog.Sinks.Seq`
+- `Serilog.Sinks.ApplicationInsights`
+- `Serilog.Enrichers.Environment`
+- `Serilog.Enrichers.Thread`
+- `Microsoft.Extensions.Logging.Abstractions`
 
 ---
 
@@ -445,20 +675,1034 @@ This is an infrastructure package with **no business logic**. Contributions are 
 
 ## Support
 
-For issues and questions:
-- GitHub Issues: [clywell/clywell-logging](https://github.com/clywell/clywell-logging/issues)
-- Documentation: [docs/getting-started.md](docs/getting-started.md)
-
----
-
-## Roadmap
-
-- [ ] Add structured log viewer UI
-- [ ] Support for custom enrichers via configuration
-- [ ] Integration with OpenTelemetry
-- [ ] Performance benchmarks
-- [ ] More sink integrations (Elasticsearch, Datadog)
+For issues and questions, open a [GitHub Issue](https://github.com/clywell/clywell-logging/issues).
 
 ---
 
 **Built with ❤️ by the Clywell team**
+ENDOFFILE`, and this is the output of running that command instead:
+     ...  clywell-logging  main  ?5 ~5  09:24  0.131s   cat > /
+Users/sodiqyekeen/Documents/dev/clywell-core/clywell-logging/README.md << 'ENDOF
+FILE'
+> # Clywell.Core.Logging
+> 
+> [![NuGet](https://img.shields.io/nuget/v/Clywell.Core.Logging.svg)](https://ww
+w.nuget.org/packages/Clywell.Core.Logging/)
+> [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https:/
+/opensource.org/licenses/MIT)
+> 
+> Structured logging infrastructure with Serilog for the Clywell platform. Provi
+des log enrichers, configuration helpers, and performance-optimized logging util
+ities with **zero business logic** - can be used in any .NET application.
+> 
+> ---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integration** - Fluent configuration for Serilog with best practi
+ces  
+> ✅ **Correlation & Request Tracking** - Automatic correlation IDs and request 
+IDs for distributed tracing  
+> ✅ **Performance Optimized** - `IsEnabled()` checks built into shorthand exten
+sion methods  
+> ✅ **Sensitive Data Redaction** - Automatic redaction of passwords, credit car
+ds, API keys  
+> ✅ **Multiple Sinks** - Console, File, Se# Clywell.Core.Logging
+> 
+> [![NuGet](https://img.shields.io/nuget/v/Clywell.Core.Logging.svg)](hm
+> [![NuGet](https://im Ti[![License: MIT](https://img.shields.io/badge/License-M
+IT-yellow.svg)](https://opensource.org/licenses/MIT)
+> 
+> Structured es
+> Structured logging infrastructure with Serilog for the Clywell platform. Provi
+des log enrichers, configurues
+> ---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integration** - Fluent configuration for Serilog with best practi
+ces  
+> ✅ **Correlation & Request Tracking** - Automatic correlation IDs and request 
+IDs for distributed tracing  
+> ✅ **Performanceest
+> #wit
+> ✅ **Serser✅ **Correlation & Request Tracking** - Automatic correlation IDs a
+nd request IDs --✅ **Performance Optimized** - `IsEnabled()` checks built into 
+shorthand extension methods  
+> ✅ **Sensitibu✅ **Sensitive Data Redaction** - Automatic redaction of passwor
+ds, credit cards, API keys );✅ **Multiple Sinks** - Console, File, Se# Clywell.
+Core.Logging
+> 
+> [![NuGet](https://img.shieng
+> [![NuGet](https://img.shields.io/nuget/v/Clywell.Core.Logging.gge[![NuGet](htt
+ps://im Ti[![License: MIT](https://im"Hello from Clywell l
+> Structured es
+> Structured logging infrastructure with Serilog for the Clywell platform. Provi
+des log enrichers, configurues
+> ---
+> 
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integration** - Fluent configuration for Serilog with best practi
+ces  
+> ✅ le
+> #utp
+> ✅ **SerFro✅ **Correlation & Request Tracking** - Automatic correlation IDs a
+nd request IDs Cu✅ **Performanceest
+> #wit
+> ✅ **Serser✅ **Correlation & Request Tracking** - Automatic correlation IDs a
+nhM#wit
+> ✅ **Serser<ffffffff>L✅l.✅ **Sensitibu✅ **Sensitive Data Redaction** - Auto
+matic redaction of passwords, credit cards, API keys );✅ **Multiple Sinks** - C
+onsole, File, Se# Clywell.Core.Logging
+> 
+> [![NuGet](httpan
+> [![NuGet](https://img.shieng
+> [![NuGet](https://img.shields.io/nuget/v/Clywell.Core.Logging.gge[![NuGet](htt
+ps://im Ti[![License: MIT](https://im"Hello from Clywell l
+> StrucInf[![NuGet](https://img.shielinStructured es
+> Structured logging infrastructure with Serilog for the Clywell platform. Provi
+des log enrichers, configurues
+> ---
+> 
+> <ffffffff> cStru
+> `Structured lCo---
+> 
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integration** - Fluent configuration for Serilog withpr
+> <ffffffff>ide
+> ## Features
+> 
+> ✅ *aul
+> ✅ **Serild✅ le
+> #utp
+> ✅ **SerFro✅ **Correlation & Request Tracking** - Automatic correlaton#utp
+>   ✅  #wit
+> ✅ **Serser✅ **Correlation & Request Tracking** - Automatic correlation IDs a
+nhM#wit
+> ✅ **Serser<ffffffff>L✅l.<ffffffff>e✅st✅ **Serser<ffffffff>L✅l.✅ **Sensit
+ibu✅ **Sensitive Data Redaction** - Automatic redacra
+> [![NuGet](httpan
+> [![NuGet](https://img.shieng
+> [![NuGet](https://img.shields.io/nuget/v/Clywell.Core.Logging.gge[![NuGet](htt
+ps://im Ti[![License: MIT](https://im"Hello from Cly`csharp
+> app.UseRequ[![NuGet](https``[![NuGet](https://img.shielitStrucInf[![NuGet](htt
+ps://img.shielinStructured es
+> Structured logging infrastructure with Serilog for the Clywell platform. Provi
+ellLoggeStructured logging infrastructure with Serilog foin---
+> 
+> <ffffffff> cStru
+> `Structured lCo---
+> 
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integration** - Fluent co  
+> <ffffffff> //`Strucc 
+> <ffffffff> cStructured lDopt
+> ## Features
+> 
+> ✅ *n
+>  
+> ✅ **Sernim<ffffffff>ide
+> ## Features
+> 
+> ✅ *aul
+> ✅ **Serild✅ le
+> #utp
+> ✅ **SerFro✅ *se##   
+> <ffffffff>      // f✅ **Shu#utp
+> ✅ **SerFroe ✅SO  ✅  #wit
+> ✅ **Serser✅ **Correlation & Request Tracking** - Automatic cht✅ **Sersho✅ 
+**Serser<ffffffff>L✅l.<ffffffff>e✅st✅ **Serser<ffffffff>L✅l.✅ **Sensitibu✅
+ **Sensitive Data  [![NuGet](httpan
+> [![NuGet](https://img.shieng
+> [![NuGet](https://img.shields.io/nuget/v/Clywell.Core.Logging.gge[![NuGnr[![Nu
+Get](httpsEn[![NuGet](https://img.shiel  app.UseRequ[![NuGet](https``[![NuGet](h
+ttps://img.shielitStrucInf[![NuGet](https://img.shielinStructured es
+> Structured logging infhClywellStructured logging infrastructure with Serilog f
+or the Clywell platform. ProviellLoggeStructured logging iof
+> <ffffffff> cStru
+> `Structured lCo---
+> 
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integration** - Fluent co  
+> <ffffffff> //`Strucc 
+> <ffffffff> cStructured lDopt
+>    `Stru   
+> <ffffffff> cStructured lD// 
+> ## Features
+> 
+> ✅ *gge
+> ✅ **Seret <ffffffff> //`Strucc 
+> <ffffffff> cStructured lDopt
+> ## Featig<ffffffff> cStructurtG## Features
+> 
+> ✅ *
+> 
+> 
+> ✅ *n
+>  
+> llD 
+> ✅ts()## Features
+> 
+> <ffffffff>o
+> ✅ *aul
+> rre✅ *nId(#utp
+> ✅ **SerFroId✅ +<ffffffff>      // f✅ **Shu#uer✅ **SerFroe ✅SO  ✅aR✅ **S
+erser✅ **Correlationer[![NuGet](https://img.shieng
+> [![NuGet](https://img.shields.io/nuget/ery method includes a built-in `IsEnabl
+ed()` guard to prevent unnecessary string allocations.
+> 
+> ```csharp
+> using Clyw[![NuGet](https://img.shiel;
+> Structured logging infhClywellStructured logging infrastructure with Serilog f
+or the Clywell platform. ProviellLoggeStructured logging iof
+> <ffffffff> cStru
+> `Structured lCo---
+> 
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integratiio<ffffffff> cStru
+> `Structured lCo---
+> 
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integration** - Fluent co  
+> <ffffffff> //`Strucc 
+> <ffffffff> cStructured lDoptgg`Structi
+> <ffffffff> cStructured lDeac
+> ## Features
+> 
+> ✅ *tic
+> ✅ **Seron,<ffffffff> //`Strucc 
+> <ffffffff> cStructured lDopt
+>    `Strdr<ffffffff> cStructurce   `Stru   
+> <ffffffff> cStrda<ffffffff> cStrucrace## Features
+> 
+> ✅ *gI
+> ✅ *gge
+> `, ✅ **Sth<ffffffff> cStructured lDopt
+> ## ed## Featig<ffffffff> cStruct
+> #
+> ✅ *
+> 
+> 
+> ✅ *n
+>  
+> llD 
+> ✅ts()##sha
+> 
+> <ffffffff> Sy 
+> llDnous✅r 
+> <ffffffff>o
+> ✅ *aul
+> rrogE✅utrre✅ ("✅ **SerFroId<ffffffff>([![NuGet](https://img.shields.io/nuge
+t/ery method includes a built-in `IsEnabled()` guard to prevent unnecessary stri
+ng allocatipi
+> ```csharp
+> using Clyw[![NuGet](https://img.shiel;
+> Structured logging infhClywellStructured logging infrastructure with Serilog f
+or copusing ClshStructured logging infhClywellStructuoc<ffffffff> cStru
+> `Structured lCo---
+> 
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integratiio<ffffffff> cStru
+> `Structured lCo---
+> 
+> <ffffffff> cStructured lD,---
+>  t`Strucpe
+> <ffffffff> cStructured lDLog
+> ## Features
+> 
+> ✅ *Ord
+> <ffffffff>with prope`Structured lCo---
+> 
+> <ffffffff> cStructurd:
+> <ffffffff> cStructured lDomp
+> ## Features
+> 
+> ✅ *in 
+> ✅ **Ser
+> 
+> -<ffffffff> //`Strucc 
+> <ffffffff> cStructured lDoptgg`Strucs <ffffffff> cStructurlo<ffffffff> cStruct
+ured lDeac
+> ## Featues## Features
+> 
+> ✅ *to
+> ✅ *tic
+> car✅ **Spr<ffffffff> cStructured lDopt
+>    in   `Strdr<ffffffff> cStructgi<ffffffff> cStrda<ffffffff> cStrucrace## Fea
+tures
+> ty
+> ✅ *gI
+> ✅ *gge
+> `, ✅ **Sthope✅ *grI`, ✅ er## ed## Featig<ffffffff> cStruct
+> #
+> ✅ oc#
+> ✅ *
+> 
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti✅(t
+> <ffffffff> Sy 
+> llg (llDnou.B<ffffffff>o
+> ✅ *ayS✅e(rrogE<ffffffff>I```csharp
+> using Clyw[![NuGet](https://img.shiel;
+> Structured logging infhClywellStructured logging infrastructure with Serilog f
+or copusing ClshStructured logging infjeusing Cl  Structured logging infhClywell
+Structu"]`Structured lCo---
+> 
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integratiio<ffffffff> cStru
+> `Structured lCo---opertyScope(
+>     ("Region", region)
+> <ffffffff> cStructured lD se
+> ## Features
+> 
+> ✅ *nce
+> ✅ **Sernce`Structured lCo---
+> 
+> <ffffffff> cStructurre
+> <ffffffff> cStructured lD### t`Strucpe
+> <ffffffff> cStrucs
+> <ffffffff> cStructp
+> ## Features
+> 
+> ✅ * p
+> ✅ *Ord
+> ing<ffffffff>with r.
+> <ffffffff> cStructurd:
+> <ffffffff> cStructured  ..<ffffffff> cStructure "## Features
+> 
+> ✅ *si
+> ✅ *in 
+> .Be✅ **SSc
+> -<ffffffff> //`SId)<ffffffff> cStructure/ ## Featues## Features
+> 
+> ✅ *to
+> ✅ *tic
+> car✅ **Spr<ffffffff> cStrucen
+> ✅ *to
+> ✅ *tic
+> cad, ✅ *t))car<ffffffff> }
+>    in   `Strdr<ffffffff> cStructgi<ffffffff> cStopty
+> ✅ *gI
+> ✅ *gge
+> `, ✅ **Sthope✅ *grI`, ✅ er## pe<ffffffff>t✅ *gpe`, ✅ Or#
+> ✅ oc#
+> ✅ *
+> 
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti✅
+> 
+> ##<ffffffff>Corre
+> 
+> <ffffffff>nId 
+> licher
+> 
+> <ffffffff>rea `llDertat<ffffffff> Sy 
+> llgerllg (lev✅ *ayS✅ry.
+> 
+> - using Clyw[![NuGet](https://im sStructured logging infhClywellStrucn co
+> <ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integratiio<ffffffff> cStru
+> `Structured lCo---opertyScope(
+>     ("Region", region)
+> <ffffffff> cStructured lD se
+> ## Features
+> 
+> ✅ *nce
+> ✅ **Sernce`Structsto
+> ## Features
+> 
+> ✅ *her
+> ✅ **Sert t`Structured lCo---opertyScope(
+> es    ("Region", region)
+> <ffffffff> cStrrr<ffffffff> cStructured lD se
+> #rp## Features
+> 
+> ✅ *e.
+> ✅ *nce
+> ric✅ **S// Set manually (e.g., in a backgr<ffffffff> cStructurete<ffffffff> c
+Strucs
+> <ffffffff> cStructp
+> ## Featrr<ffffffff> cStrucla## Featur"m
+> ✅ * p
+> <ffffffff>on✅ *O``ing<ffffffff>wi R<ffffffff> cStructuric<ffffffff> cStructur
+e`R
+> ✅ *si
+> ✅ *in 
+> .Be✅ **SSc
+> -<ffffffff> //`SId)val✅ *ise.Be✅ se-<ffffffff> //`SId)<ffffffff>al
+> ✅ *to
+> ✅ *tic
+> car✅ **Spr<ffffffff> cStrucen
+> ✅ pr✅ *t(ncar✅ ac✅ *to
+> ✅ *tic
+> cad,tI✅ *tewcad, <ffffffff>d   in   `Strdr<ffffffff> cStrm ✅ *gI
+> ✅ *gge
+> `, ✅ **Sthope<ffffffff> ✅ *g s`, ✅ t ✅ oc#
+> ✅ *
+> 
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti✅nd stor✅ *
+> in
+> 
+> <ffffffff>pCo 
+> llD.Ite
+> <ffffffff>requellDert`
+> 
+> ```csharp
+> u
+> <ffffffff>nId 
+> elllicherLo
+> <ffffffff>r.Enllgerllg (lev✅ *ayS<ffffffff>c
+> - using Clyw[![NuGet](htt-re<ffffffff> cStructured lD,---
+> 
+> ## Features
+> 
+> ✅ **Serilog Integratiio<ffffffff> cStru
+> `Streg
+> ## Features
+> 
+> ✅ *a `
+> ✅ **Serues`Structured lCo---opertyScope(
+> 
+> `    ("Region", region)
+> <ffffffff> cStrrr<ffffffff> cStructured lD se
+> #);## Features
+> 
+> ✅ *<R
+> ✅ *nce
+> ddl✅ **S);## Features
+> 
+> ✅ *herHe
+> ✅ *her
+> | H✅ **Sries    ("Region", region)
+> <ffffffff> cStrrr<ffffffff> cStruc|-<ffffffff> cStrrr<ffffffff> cStructured ld
+M#rp## Features
+> 
+> ✅ *e.
+> <ffffffff>-
+> ✅ *e.
+> ✅ ela✅ *ID`ric✅ rr<ffffffff> cStructp
+> ## Featrr<ffffffff> cStrucla## Featur"m
+> ✅ * p
+> <ffffffff>on✅ *O``ing<ffffffff>-## Featrreq✅ * p
+> <ffffffff>on✅ *O``ing<ffffffff>wi Rti<ffffffff>on<ffffffff> Redaction
+> 
+> `SensitiveDataRedactionPolicy` is a Se✅ *i`I.Be✅ tu-<ffffffff> //`SId)v t✅ 
+*to
+> ✅ *tic
+> car✅ **Spr<ffffffff> cStrucen
+> <ffffffff>t✅ *tatcar✅ it✅ pr✅ *t(ncar✅ **✅ *tic
+> cad,tI✅ *tewcad, <ffffffff> cad,tI<ffffffff>e✅ *gge
+> `, ✅ **Sthope<ffffffff> ✅ *g s`, ✅ t ✅ oc#32`, ✅ 67✅ *
+> 
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>r***`llDertasin
+> 
+> <ffffffff>pCo 
+> llD.Ite
+> <ffffffff>d
+>  sellD.It| <ffffffff>reqDA
+> ```csharp
+> u
+> <ffffffff>I u
+> <ffffffff>nIdd | elllicey<ffffffff>r.Enllg| - using Clyw[![NuGet](htt-re<fffff
+fff> as
+> ## Features
+> 
+> ✅ **Serilog Integratiio<ffffffff> cStru
+> RED
+> ✅ **Ser|
+> 
+> `Streg
+> ## Features
+> 
+> ✅ *a `
+> <ffffffff>n## Feat
+> ✅ *a `
+> sha✅ **Sig
+> `    ("RegiveDataRedaction(); // included a<ffffffff> cStrrr<ffffffff> cStruct
+ured yw#);## Features
+> 
+> ✅ *<R
+> <ffffffff>b
+> ✅ *<R
+> ✅ enc✅ *nctddl✅ `c
+> ✅ *herHe
+> ✅ *her
+> |ll ✅ *her
+> pa| H✅ bu<ffffffff> cStrrr<ffffffff> cStruc|-<ffffffff> cStrrr<ffffffff> cStr
+uctct
+> ✅ *e.
+> <ffffffff>-
+> ✅ *e.
+> ✅ ela✅ *ID`ric✅ rr<ffffffff> cStructpiti<ffffffff>-
+> <ffffffff>e✅ti✅ elio## Featrr<ffffffff> cStrucla## Featur"m
+> <ffffffff>l✅ * p
+> <ffffffff>on✅ *O``ing<ffffffff>-##   <ffffffff>on<ffffffff>t<ffffffff>on✅ *O
+``ing<ffffffff>wi Rti<ffffffff>on<ffffffff> Reda);
+> `SensitiveDataRedactionPolicy` is a SeyOp✅ *tic
+> car✅ **Spr<ffffffff> cStrucen
+> <ffffffff>t✅ *tatcar✅ it✅ pr✅ *t(ncar✅ tocar✅ n(<ffffffff>t✅ *tatcar✅ 
+it  cad,tI✅ *tewcad, <ffffffff> cad,tI<ffffffff>e✅ *gge
+> `, ✅ **StNo`, ✅  .DisableCreditCardRedaction()
+>   
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac 
+> llD)
+>   
+> <ffffffff>rsablllDertyR
+> <ffffffff>9`  ()
+> llD*.Dis<ffffffff>r**ai
+> <ffffffff>pCo 
+> llD.Ite
+> n()llD.ItDi<ffffffff>d
+>  sll sfa```csharp
+> u
+> <ffffffff>I u
+> );u
+> <ffffffff>I u
+> rns <ffffffff>nit## Features
+> 
+> ✅ **Serilog Integratiio<ffffffff> cStru
+> RED
+> ✅ **Ser|
+> r 
+> ✅ **Ser SeRED
+> ✅ **Ser|
+> 
+> `Streg
+> ## Featuct<ffffffff>s
+> `Streg
+> #("p## Ferd
+> ✅ *a `
+> 3")<ffffffff>n## tu✅ *a `
+> sDAsha✅ 
+> ``    ("Regi# 
+> ✅ *<R
+> <ffffffff>b
+> ✅ *<R
+> ✅ enc✅ *nctddl✅ `c
+> ✅ *herHe
+> ✅ *her
+> |ll ✅ *her
+> ers<ffffffff>r uni✅es✅ enog✅ *herHe
+> ✅ *her
+> |llIn✅ *her
+> Si|ll ✅ptpa| H✅ bug ✅ *e.
+> <ffffffff>-
+> ✅ *e.
+> ✅ ela✅ *ID`ric✅ rk = new InMem✅Lo✅ el);<ffffffff>e✅ti✅ elio## Featrr<ff
+ffffff> cStrucla## Fe  <ffffffff>l✅ * p
+> <ffffffff>on✅ *O``ing<ffffffff>-##   <ffffffff>on<ffffffff>t<ffffffff>(L<ffff
+ffff>on✅ *Oel`SensitiveDataRedactionPolicy` is a SeyOp✅ *tic
+> car✅ **Spr<ffffffff> cStogcar✅ **Spr<ffffffff> cStrucen
+> <ffffffff>t✅ *tatcar✅ it✅ .G<ffffffff>t✅ *tatcar✅ itrd`, ✅ **StNo`, ✅  
+.DisableCreditCardRedaction()
+>   
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac
+> s  
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+>  r
+> set 
+> llDeen 
+> <ffffffff>re```llDert `
+> <ffffffff>9`  erFllD*RE`
+> <ffffffff>dacesllD)
+>  os  
+> .E<ffffffff>e<ffffffff>9`  ()
+> llD*.ILllD*.Disns<ffffffff>pCo 
+> llked by llD.ItMen()llDgS sll sfa```csaru
+> <ffffffff>I u
+> );u
+> <ffffffff>I nk t);u
+> he<ffffffff>(mrns co
+> ✅ **Serilog InteginkRED
+> ✅ **Ser|
+> r 
+> ✅ **Ser SeRtL<ffffffff>er 
+> ✅ **()<ffffffff>
+> ✅ **Ser|
+> 
+> `Sr
+> 
+> `Streg
+> #er,## Fe) `Streg
+> #("p##ac#("p#Cr✅ *a `
+> 3gg3")<ffffffff>ninsDAsha✅ 
+> ``    (" P``    ("Rur✅ *<R
+> <ffffffff>b
+>  s<ffffffff>b
+> <ffffffff>e✅nM✅ enog✅ *herHe
+> ✅ *her
+> |llst✅ *her
+> to|ll ✅teers<ffffffff>r unisi✅ *her
+> |llIn✅ *her
+> Si|ll ✅p##|llIn<ffffffff>eSi|ll ✅ptpen<ffffffff>-
+> ✅ *e.
+> ✅ ela✅ *ID`rink✅or✅ elas<ffffffff>on✅ *O``ing<ffffffff>-##   <ffffffff>on
+<ffffffff>t<ffffffff>(L<ffffffff>on✅ *Oel`SensitiveDataRedactionPolicy` is aHav
+eLogged(LogEventLecar✅ **Spr<ffffffff> cStogcar✅ **Spr<ffffffff> cStrucen
+> <ffffffff>t✅ *tatcar✅ it✅ .G<ffffffff>t✅ *tatcar✅ itrd`, ("<ffffffff>t✅ 
+*tatcar✅ it✅ .G<ffffffff>t✅ *tatcVa  
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac
+> s  
+> ception>();
+> ```
+> 
+> **Example test:*
+> 
+> 
+> ` 
+> llDarp
+> 
+> <ffffffff>re
+> pullDertoi
+> <ffffffff>9`  erIllD*REpe<ffffffff>dac  s  
+> 
+> (l
+> <ffffffff>er 
+> llDk) =
+> <ffffffff>reoggllDertor
+> <ffffffff>9`  Tes r
+> setrWsthllDk<<ffffffff>re`rv<ffffffff>9`  erFllD*Rin<ffffffff>dacesllD)
+>  osse os  
+> .E<ffffffff>er-.E<ffffffff>))llD*.ILllD*.D  llked by llD.ItMenn perfo<ffffffff
+>I u
+> );u
+> <ffffffff>I nk t);u
+> he<ffffffff>(mrns co
+> ✅ *(L);u
+> en<ffffffff>evhe<ffffffff>(formati✅ **Seril p✅ **Ser|
+> r 
+> ✅ **Ser ulr 
+> ✅ **er<ffffffff>V✅ **()<ffffffff>
+> ✅ **Ser-1✅ **Ser``
+> `Sr
+> 
+> `St appsett#er,#js#("p##ac#("p#Cr<ffffffff>
+> 3gg3")<ffffffff>ninsDAsha✅  {``    (" P``    ("Rur{
+> <ffffffff>b
+>  s<ffffffff>b
+> <ffffffff>e✅nM✅ enoon s<ffffffff> <ffffffff>e<ffffffff>v✅ *her
+> |llst✅ *her
+> toso|llst<ffffffff>rto|ll ✅tee  |llIn✅ *her
+> Si|ll ✅p##|llIn  Si|ll ✅p##eT✅ *e.
+> ✅ ela✅ *ID`rink✅or✅ el",✅ el  <ffffffff>t✅ *tatcar✅ it✅ .G<ffffffff>t 
+✅ *tatcar✅ itrd`, ("<ffffffff>t✅ *tatcar✅ it✅ .G<ffffffff>t✅ *tatcVa  
+> 
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac
+> s  
+> ception>()  
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac
+> s  
+> ception>();
+> ```
+> 
+> **Ex          "reta 
+> llDileC
+> <ffffffff>remitllDert  
+> <ffffffff>9`     llD*RE  <ffffffff>dac  s  
+> cchce [```
+> 
+> **Exant
+> *t",
+> 
+> ` 
+> llDarp
+> 
+> <ffffffff>e"]l  
+> <ffffffff>r"Lopullg"<ffffffff>9`  erSe
+> (l
+> <ffffffff>er 
+> llDk) =
+> <ffffffff>reogglltp:<ffffffff>lllDkho<ffffffff>reo1"<ffffffff>9`  Tes r
+> seApsetrWsthllDsi osse os  
+> .E<ffffffff>er-.E<ffffffff>))llD*.ILllD*.D  llked by lKe.E<ffffffff>er-.E}
+> );u
+> <ffffffff>I nk t);u
+> he<ffffffff>(mrns co
+> ✅ *(L);u
+> en<ffffffff>evhe<ffffffff>(formatby<ffffffff>Adhe<ffffffff>(mrns `,✅ *(L);u
+> tlen<ffffffff>evhe<ffffffff>ar 
+> ✅ **Ser ulr 
+> ✅ **er<ffffffff>V✅ **()<ffffffff>
+> ea<ffffffff>r✅ **er<ffffffff>V<ffffffff>n✅ **Ser-1✅ **Serts`Sr
+> 
+> `St appsett#er,#ir
+> `ment-Specific Examples
+> 
+> ### Development<ffffffff>b
+>  s<ffffffff>b
+> <ffffffff>e✅nM✅ enoon s<ffffffff> <ffffffff>e<ffffffff>v✅    s<ffffffff>i<f
+fffffff>e<ffffffff> |llst✅ *her
+> toso|llst<ffffffff>rttLevel.Debtoso|llst<ffffffff>.WSi|ll ✅p##|llIn  Si|ll ✅
+p##eT✅ *e"l✅ ela✅ *ID`rink✅or✅ el",✅ el ul
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac
+> s  
+> ception>()  
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac
+>     
+> llDithC
+> <ffffffff>reSinllDerJso
+> <ffffffff>9`  
+>   llD*RE.W<ffffffff>daclis  
+> cnIceig✅ *n
+>  
+> l    
+> llD.Wit
+> <ffffffff>rellDllDerts(
+> <ffffffff>9`    .llD*REde<ffffffff>dacmLs  
+> c"Mcero```
+> 
+> **Ex Ev
+> *tLellDileC
+> <ffffffff>remitll   <ffffffff>remid<ffffffff>9`     llD*RSycchce [```
+> 
+> **Exant
+> *t",
+> 
+> ` );
+> **Exant
+> 
+> --*t",
+> 
+> Mi
+> ` eware 
+> <ffffffff>eine<ffffffff>r"Lop``(l
+> <ffffffff>er 
+> llDk) =
+> <ffffffff>reoer<ffffffff>ullDk);<ffffffff>reoUsseApsetrWsthllDsi osse os  
+> .E<ffffffff>er-.E<ffffffff>))re.E<ffffffff>er-.E<ffffffff>))llD*.ILllD*.D a);u
+
+> <ffffffff>I nk t);u
+> he<ffffffff>(mrns co
+> ✅ *(L);u
+> en<ffffffff>evhe<ffffffff><ffffffff>P lhe<ffffffff>(mrns eq✅ *(L);u
+> nren<ffffffff>evhe<ffffffff>etlen<ffffffff>evhe<ffffffff>ar 
+> ✅ **Ser ulr 
+> ✅ **er<ffffffff>V<ffffffff>e✅ **Ser ulr pp✅ **er<ffffffff>V<ffffffff>iea<ff
+ffffff>r✅ **er<ffffffff>V<ffffffff>nle
+> `St appsett#er,#ir
+> `ment-Specific Examples
+> s
+> 
+> `ment-Specific Exd 
+> ### Development<ffffffff>b
+>  ❌ s<ffffffff>b
+> <ffffffff>e✅nM✅po<ffffffff>e<ffffffff> toso|llst<ffffffff>rttLevel.Debtoso|l
+lst<ffffffff>.WSi|ll ✅p##|llIn  Sid ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac
+> s  
+> ception>()  
+> ✅ *n
+>  
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`
+> 
+>  
+> llDse s
+> <ffffffff>rand llDertio
+> <ffffffff>9`  xpellD*RElo<ffffffff>dacess  
+> ccscerp✅ *n
+>  
+> ll:  
+> llDliza
+> <ffffffff>ralwallDerts 
+> <ffffffff>9`  DebllD*s di<ffffffff>dac
+> l    
+> .LllDeb<ffffffff>reSue<ffffffff>9`  
+>   llD*RnS  llD*zecnIceig✅ *n
+>  
+> l   ec 
+> l    
+> llD.<ffffffff><ffffffff> GllD. D<ffffffff>rel c<ffffffff>9`    .llD*R fc"st; s
+erialization only runs 
+> **Ex Ev
+> ed
+> *tLell.D<ffffffff>remitlly 
+> **Exant
+> *t",
+> 
+> ` );
+> **Exant
+> 
+> --*t",
+> 
+> Mi
+> ` ewaregeO*t",
+> 
+> );
+> ```
+> 
+> **E U
+> --*t"cut
+> Mi
+> `ime`he<ffffffff>einens<ffffffff>er 
+> llDk) =
+> <ffffffff>rpwllDkes<ffffffff>reosh.E<ffffffff>er-.E<ffffffff>))re.E<ffffffff>e
+r-.E<ffffffff>))llD*.ILllD*.D a);u
+> <ffffffff>I tN<ffffffff>I nk t);u
+> he<ffffffff>(mrns co
+> ✅ *(L);u
+> en<ffffffff>evhe<ffffffff>;he<ffffffff>(mrns ;
+> ✅ *(L);u
+> nfen<ffffffff>evhe<ffffffff>Qnren<ffffffff>evhe<ffffffff>etlen<ffffffff>evhe<f
+fffffff>ar 
+> ✅ **SMi✅ **Ser ulr 
+> ✅ **er<ffffffff>Vvar✅ **er<ffffffff>V<ffffffff>t`St appsett#er,#ir
+> `ment-Specific Examples
+> s
+> 
+> `ment-Specific Exd 
+> #As`ment-;
+> ```
+> 
+> ### Uss
+> 
+> `ment-Specific Exd log g### Development<ffffffff>/  ❌ s<ffffffff>b
+> <ffffffff>e✅nis<ffffffff>e✅nM<ffffffff>o 
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>9`  
+> llD*RED
+> <ffffffff>dac
+> s  
+> ception>()  
+> ✅ *n
+>  
+> llDTwo rId)
+> <ffffffff>re  lllDertIn
+> <ffffffff>9`  essllD*REqu<ffffffff>dac
+>  s  
+> caicePr✅ *n
+>  
+> ll); 
+> llDlogg
+> <ffffffff>reo("llDertt 
+> <ffffffff>9`
+> 
+> ");
+>  
+> l``
+> 
+> -<ffffffff>ran R<ffffffff>9`  xpellD*R**ccscerp✅ *n
+>  
+> ll:  
+> llDliz+* 
+> ll:  
+> llDlT CollDl0.<ffffffff>ralfo<ffffffff>9`  DebllD*s `l    
+> .LllDeb<ffffffff>reSue<ffffffff>e.Llles  llD*RnS  llD*zecnIcep 
+> l   ec 
+> l    
+> llD.<ffffffff><ffffffff> GllD. ilogl    
+> tCllD.
+> -**Ex Ev
+> ed
+> *tLell.D<ffffffff>remitlly 
+> **Exant
+> *t",
+> 
+> ` );
+> **Exant
+> 
+> --*t",
+> q`
+> ed
+> *tLil*g.**Exant
+> *t",
+> 
+> ` );
+> si*t",
+> 
+> - 
+> ` ril**EEn
+> --*t"s.E
+> Mi
+> `nme`t`
+> );
+> ```
+> 
+> **E nri`hers.Th--*t`
+> Mi
+> `icros`ftllDk) =
+> <ffffffff>rpwllDkesAb<ffffffff>rpwio<ffffffff>I tN<ffffffff>I nk t);u
+> he<ffffffff>(mrns co
+> ✅ *(L);u
+> en<ffffffff>evhe<ffffffff>;he<ffffffff>(mrns ;
+> --he<ffffffff>(mrns co
+> ✅ng✅ *(L);u
+> n en<ffffffff>evhe<ffffffff>t✅ *(L);u
+> nfen<ffffffff>evhe bnfen<ffffffff>evhog✅ **SMi✅ **Ser ulr 
+> ✅ **er<ffffffff>Vvar<ffffffff> ✅ **er<ffffffff>Vvar✅ **erte`ment-Specific E
+xamples
+> s
+> 
+> `ment-Specific Exd sts
+> 
+> `ment-Specific Exd cover#As`ment-;
+> ```
+> 
+> ##ll```
+> 
+> ### 
+> -
+> #
+> 
+> #
+> `mentort<ffffffff>e✅nis<ffffffff>e✅nM<ffffffff>o 
+> llDTwo 
+> 
+> <ffffffff>ree 
+> llDerti-4
+> 
+> <ffffffff>/cllDTwo 
+> 
+> <ffffffff>ree 
+> llDs:
+> <ffffffff>reub.llDertyw
+> <ffffffff>9`  ellllD*REng<ffffffff>dacs)s  
+> ccucent✅on: [docs/getting-s<ffffffff>re  lll(d<ffffffff>9`  essllD*Rrt s  
+> caicePr✅ *n
+>  
+> llthcai<ffffffff><ffffffff>
+> ll); 
+> llDlywelllDlam<ffffffff>reoOF<ffffffff>9`

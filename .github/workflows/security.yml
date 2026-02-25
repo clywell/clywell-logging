@@ -111,6 +111,8 @@ jobs:
     permissions:
       # Needed to upload the results to code-scanning dashboard.
       security-events: write
+      # Needed to access GitHub OIDC token for publish_results: true
+      id-token: write
       # Needed to access secrets.GITHUB_TOKEN
       contents: read
 
@@ -121,7 +123,7 @@ jobs:
           persist-credentials: false
 
       - name: Run OSSF Scorecard
-        uses: ossf/scorecard-action@v2
+        uses: ossf/scorecard-action@v2.4.3
         with:
           results_file: results.sarif
           results_format: sarif

@@ -137,12 +137,6 @@ jobs:
       - name: Build benchmark runner
         run: dotnet build --configuration Release tests/Clywell.Core.Logging.BenchmarkRunner/Clywell.Core.Logging.BenchmarkRunner.csproj --no-restore
 
-      - name: Run benchmarks (LogMessages)
-        run: dotnet run -c Release -- --filter "*LogMessagesBenchmarks*" --exporters json
-        working-directory: tests/Clywell.Core.Logging.BenchmarkRunner
-        timeout-minutes: 30
-        continue-on-error: true
-
       - name: Run benchmarks (LoggerScopes)
         run: dotnet run -c Release -- --filter "*LoggerScopeExtensionsBenchmarks*" --exporters json
         working-directory: tests/Clywell.Core.Logging.BenchmarkRunner

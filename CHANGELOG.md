@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sensitive data redaction policy (credit cards, SSNs, passwords, API keys)
 - Correlation ID middleware for ASP.NET Core
 - Request ID middleware for ASP.NET Core
-- Performance-optimized logging extensions (`LogDebugIfEnabled`, `LogTraceIfEnabled`)
+- Performance-optimized shorthand logging extensions (`Debug`, `Trace`, `Info`, `Warning`, `Error`, `Critical`) with built-in `IsEnabled()` guards
 - Execution time logging helpers (sync and async)
 - Timed logging scopes
 - ClywellLoggerConfiguration fluent builder

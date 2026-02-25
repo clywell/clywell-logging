@@ -19,10 +19,6 @@
         <None Include="../../README.md" Pack="true" PackagePath="\" />
     </ItemGroup>
 
-    <ItemGroup>
-        <AdditionalFiles Include="../../stylecop.json" Link="stylecop.json" />
-    </ItemGroup>
-
     <PropertyGroup>
         <!-- Disabled StyleCop rules -->
         <NoWarn>$(NoWarn);SA1101;SA1200;SA1309;SA1633;SA1210;SA1204;SA1413;SA1618</NoWarn>
