@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## 1.0.0 - 2026-02-25
+## [1.0.0] - 2026-02-25
 
 ### Added
 - Initial release of Clywell.Core.Logging
@@ -52,15 +52,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0-alpha.1] - 2026-02-03
-
-### Added
-- First alpha release for internal testing
-- Core logging infrastructure complete
-- All planned features implemented
-- Tests passing with 80%+ coverage
-
----
-
-[Unreleased]: https://github.com/clywell/clywell-logging/compare/v1.0.0-alpha.1...HEAD
-[1.0.0-alpha.1]: https://github.com/clywell/clywell-logging/releases/tag/v1.0.0-alpha.1
+[Unreleased]: https://github.com/clywell/clywell-logging/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/clywell/clywell-logging/releases/tag/v1.0.0
