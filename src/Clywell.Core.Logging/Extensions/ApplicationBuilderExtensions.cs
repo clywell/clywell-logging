@@ -34,9 +34,9 @@ public static class ApplicationBuilderExtensions
         // Set the global logger
         Log.Logger = loggerConfig.Build();
 
-        // Configure Serilog as the logging provider
-        builder.Logging.ClearProviders();
-        builder.Logging.AddSerilog(dispose: true);
+        // Configure Serilog as the host logging provider.
+        // UseSerilog registers DiagnosticContext in DI, which is required by UseSerilogRequestLogging.
+        builder.Host.UseSerilog(Log.Logger, dispose: true);
 
         return builder;
     }

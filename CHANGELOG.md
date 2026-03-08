@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-03-08
+
+### Fixed
+- `AddLogging` now uses `builder.Host.UseSerilog()` instead of `builder.Logging.AddSerilog()` to correctly register `DiagnosticContext` in the DI container, enabling `UseRequestLogging()` (`UseSerilogRequestLogging`) to work without a startup exception.
+
+---
+
 ## [1.0.0] - 2026-02-25
 
 ### Added
@@ -52,5 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/clywell/clywell-logging/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/clywell/clywell-logging/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/clywell/clywell-logging/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/clywell/clywell-logging/releases/tag/v1.0.0

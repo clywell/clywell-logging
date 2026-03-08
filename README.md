@@ -21,7 +21,6 @@ Structured logging infrastructure with Serilog for the Clywell platform. Provide
 ✅ **ASP.NET Core Middleware** - Track correlation IDs and request IDs across HTTP requests  
 ✅ **Testing Utilities** - In-memory sink and assertion helpers for unit tests  
 ✅ **.NET 10.0+** - Modern C# features and latest language version  
-✅ **80%+ Test Coverage** - Comprehensive unit tests with FluentAssertions
 
 ---
 
