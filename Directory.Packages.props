@@ -44,6 +44,6 @@
         <!-- Versioning -->
         <PackageVersion Include="Nerdbank.GitVersioning" Version="3.9.50" />
 
-        <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+        <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
     </ItemGroup>
 </Project>
