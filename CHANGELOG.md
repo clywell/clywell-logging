@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2026-04-18
+
+### Changed
+
+#### `Clywell.Core.Logging`
+- Bumped `Serilog.Sinks.ApplicationInsights` from 5.0.0 to 5.0.1
+- Bumped `Microsoft.Extensions.Logging.Abstractions` from 10.0.3 to 10.0.6
+- Bumped `Microsoft.Extensions.Configuration.Abstractions` from 10.0.3 to 10.0.6
+- Bumped `Microsoft.Extensions.DependencyInjection.Abstractions` from 10.0.3 to 10.0.6
+- Bumped `Microsoft.NET.Test.Sdk` from 18.3.0 to 18.4.0 (test-only)
+- Bumped `coverlet.collector` from 8.0.0 to 10.0.0 (test-only)
+- Bumped `Microsoft.AspNetCore.OpenApi` from 10.0.0 to 10.0.3
+
+---
+
 ## [1.1.0] - 2026-03-08
 
 ### Fixed
